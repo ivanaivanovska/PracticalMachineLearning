@@ -1,0 +1,478 @@
+---
+title: "Practical Machine Learning - Report"
+output:
+  html_document:
+    theme: united
+    toc: yes
+---
+
+<style type="text/css">
+body, td {
+   font-family: sans-serif;
+   background-color: white;
+   margin: 8px;
+}
+
+tt, code, pre {
+   font-family: 'DejaVu Sans Mono', 'Droid Sans Mono', 'Lucida Console', Consolas, Monaco, monospace;
+}
+
+
+</style>
+ 
+The following report describes analysis of a dataset with measurements from accelerometers of 6 participants taken while they were performing barbell lifts. The goal of the analysis is to make a model for prediction of the manner in which the participants did the exercise. 
+
+The report includes information on the variables from the dataset used to build the model, the model that was used for prediction, as well as its evaluation and expected accuracy. 
+
+The model was at the end applied to predict 20 different test cases.
+
+The analysis follows the following steps:
+
+- Defining a question
+- Getting input data
+- Feature selection
+- Algorithm
+- Parameters
+- Evaluation
+
+
+
+
+**Question:**
+
+The question we try to answer with this analysis is: 'Can we use accelerometer measurements to predict 'how well' a participant did an exercise?'
+
+**Input data:** 
+
+There were 2 datasets provided for the purpose of the analysis:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+After downloading the datasets, they were loaded in R as:
+
+```{r eval=FALSE}
+# Input Data
+trainingSet <- read.csv("pml-training.csv", na.strings=c("NA",""), header=TRUE)
+tests <- read.csv("pml-testing.csv", na.strings=c("NA",""), header=TRUE)
+```
+
+*Training set*
+
+- 19622 observations
+- 160 variables
+- output variable: "classe". Values: A, B, C, D, E depending on the level of the performance.
+
+*Tests*
+
+- 20 new observations
+- 160 variables. Note: the "classe" is not present in the test data. A variable "problem_id" exists instead. The other variables are the same as the training set.
+
+
+**Feature selection:**
+
+After loading and getting familiar with the structure of the datasets, we try to figure out which variables are relevant for the prediction and for which of them information is available.
+
+- Inspecting the dataset
+
+The 'summary' command gives summarized information on the dataset:
+```{r eval=FALSE}
+# 1. inspection of the dataset 
+summary(trainingSet)
+```
+
+Example output:
+
+```{r eval=FALSE}
+ new_window    num_window      roll_belt        pitch_belt          yaw_belt       total_accel_belt
+ no :19216   Min.   :  1.0   Min.   :-28.90   Min.   :-55.8000   Min.   :-180.00   Min.   : 0.00   
+ yes:  406   1st Qu.:222.0   1st Qu.:  1.10   1st Qu.:  1.7600   1st Qu.: -88.30   1st Qu.: 3.00   
+             Median :424.0   Median :113.00   Median :  5.2800   Median : -13.00   Median :17.00   
+             Mean   :430.6   Mean   : 64.41   Mean   :  0.3053   Mean   : -11.21   Mean   :11.31   
+             3rd Qu.:644.0   3rd Qu.:123.00   3rd Qu.: 14.9000   3rd Qu.:  12.90   3rd Qu.:18.00   
+             Max.   :864.0   Max.   :162.00   Max.   : 60.3000   Max.   : 179.00   Max.   :29.00   
+                                                                                                   
+ kurtosis_roll_belt kurtosis_picth_belt kurtosis_yaw_belt skewness_roll_belt skewness_roll_belt.1
+ #DIV/0!  :   10    #DIV/0!  :   32     #DIV/0!:  406     #DIV/0!  :    9    #DIV/0!  :   32     
+ -1.908453:    2    47.000000:    4     NA's   :19216     0.000000 :    4    0.000000 :    4     
+ -0.016850:    1    -0.150950:    3                       0.422463 :    2    -2.156553:    3     
+ -0.021024:    1    -0.684748:    3                       -0.003095:    1    -3.072669:    3     
+ -0.025513:    1    -1.750749:    3                       -0.010002:    1    -6.324555:    3     
+ (Other)  :  391    (Other)  :  361                       (Other)  :  389    (Other)  :  361     
+ NA's     :19216    NA's     :19216                       NA's     :19216    NA's     :19216   
+```
+
+From the summary we can see that there are a lot of variables that have missing values (NAs) and for some of them there is not enough variance in the values (e.g. new_window).
+
+- Removing columns containing NAs:
+
+```{r eval=FALSE}
+# 2. removing columns with NAs: 
+anyNA <- as.vector(apply(trainingSet, 2, anyNA))
+
+trainingSetColumns <- colnames(trainingSet)
+excludeVariables <- trainingSetColumns[anyNA]
+
+reducedTraining  <- trainingSet[ , -which(names(trainingSet) %in% excludeVariables)]
+```
+
+- Removing near zero variance variables:
+
+```{r eval=FALSE}
+# 3. near zero variance
+nzv <- nearZeroVar(reducedTraining, saveMetrics=TRUE)
+
+# 1 column has near zero variance: num_window
+column_names = row.names(nzv)
+additionalExclude <- column_names[nzv$nzv==TRUE]
+
+reducedTraining = reducedTraining[ , -which(names(reducedTraining) %in% additionalExclude)]                  
+excludeVariables <- c(excludeVariables, additionalExclude)
+```
+
+- Removing variables not related with the output:
+
+At the end, we just remove the variables that are not related and not relevant for the prediction:
+
+```{r eval=FALSE}
+# 4. From the remaining variables, also removed: 
+#    X (row names), the time/date variables, num_window: 
+#    they are not expected to be related (or relevant) for the prediction
+
+additionalExclude <- c("X", "cvtd_timestamp", "raw_timestamp_part_1", 
+                       "raw_timestamp_part_2", "num_window")
+reducedTraining = reducedTraining[ , -which(names(reducedTraining) %in% additionalExclude)]
+excludeVariables <- c(excludeVariables, additionalExclude)
+
+# finally, remove the same columns from the tests (for LATER)
+reducedTests = tests[ , -which(names(tests) %in% excludeVariables)]
+
+###########################################################################################
+```
+
+As it can be seen in the code segments, the inspection of the features was done in the training set.
+The same processing was however applied to the test set at the end.
+
+The feature selection resulted in the following variables:
+
+```{r eval=FALSE}
+> colnames(reducedTraining)
+ [1] "user_name"            "roll_belt"            "pitch_belt"           "yaw_belt"            
+ [5] "total_accel_belt"     "gyros_belt_x"         "gyros_belt_y"         "gyros_belt_z"        
+ [9] "accel_belt_x"         "accel_belt_y"         "accel_belt_z"         "magnet_belt_x"       
+[13] "magnet_belt_y"        "magnet_belt_z"        "roll_arm"             "pitch_arm"           
+[17] "yaw_arm"              "total_accel_arm"      "gyros_arm_x"          "gyros_arm_y"         
+[21] "gyros_arm_z"          "accel_arm_x"          "accel_arm_y"          "accel_arm_z"         
+[25] "magnet_arm_x"         "magnet_arm_y"         "magnet_arm_z"         "roll_dumbbell"       
+[29] "pitch_dumbbell"       "yaw_dumbbell"         "total_accel_dumbbell" "gyros_dumbbell_x"    
+[33] "gyros_dumbbell_y"     "gyros_dumbbell_z"     "accel_dumbbell_x"     "accel_dumbbell_y"    
+[37] "accel_dumbbell_z"     "magnet_dumbbell_x"    "magnet_dumbbell_y"    "magnet_dumbbell_z"   
+[41] "roll_forearm"         "pitch_forearm"        "yaw_forearm"          "total_accel_forearm" 
+[45] "gyros_forearm_x"      "gyros_forearm_y"      "gyros_forearm_z"      "accel_forearm_x"     
+[49] "accel_forearm_y"      "accel_forearm_z"      "magnet_forearm_x"     "magnet_forearm_y"    
+[53] "magnet_forearm_z"     "classe" 
+```
+
+
+**Algorithm:**
+
+One of the most important characteristic of a prediction model is its accuracy, so I choose 'random forests' and 'boosting' methods, as they are machine learning algorithms with very high accuracy. I tried how each of them performed on our datasets.
+
+As the training dataset was too large, and the limitations of the selected methods is performance, I randomly selected part of it (30%) and used it for training the models. The training set still contained enough data, while resonable performance was achived.
+
+```{r eval=FALSE}
+library(caret)
+library(randomForest)
+
+set.seed(666)
+inPart1 <- createDataPartition(y=reducedTraining$classe, p=0.30, list=FALSE)
+part1 <- reducedTraining[inPart1, ]
+restPart1 <- reducedTraining[-inPart1, ]
+```
+
+**Parameters:**
+
+The 'train' function that I used for building the model, uses 'bootstrapping' with 25 number of times to repeat the resampling of the data. Because of the performance issues, I changed the default parameter to 4 times. I also tried both with cross validation k-fold and boostraping as data sampling methods for the random forests.
+
+**Evaluation:**
+
+**Random Forest model**
+
+a) cross-validation 4-fold
+
+Dividing training and test sets:
+
+```{r eval=FALSE}
+# Training: 60%; Testing: 40%
+
+set.seed(666)
+inPart11 <- createDataPartition(y=part1$classe, p=0.6, list=FALSE)
+trainPart1 <- part1[inPart11, ]
+testPart1 <- part1[-inPart11, ]
+```
+
+
+Fitting the model:
+
+```{r eval=FALSE}
+# model 1:
+set.seed(666)
+modFit <- train(classe ~ ., data=trainPart1, method="rf", 
+                trControl=trainControl(method = "cv", number = 4), prox=TRUE)
+```
+
+```{r eval=FALSE}
+> modFit
+Random Forest 
+
+3535 samples
+  53 predictor
+   5 classes: 'A', 'B', 'C', 'D', 'E' 
+
+Pre-processing: centered, scaled 
+Resampling: Cross-Validated (4 fold) 
+
+Summary of sample sizes: 2651, 2652, 2651, 2651 
+
+Resampling results across tuning parameters:
+
+  mtry  Accuracy   Kappa      Accuracy SD  Kappa SD   
+   2    0.9547409  0.9427206  0.008400064  0.010639894
+  29    0.9606808  0.9502485  0.005707651  0.007235686
+  57    0.9570036  0.9456000  0.008701574  0.011029445
+
+Accuracy was used to select the optimal model using  the largest value.
+The final value used for the model was mtry = 29. 
+```
+
+Evaluation of the accuracy on the sampled test set:
+
+```{r eval=FALSE}
+# Prediction model 1:
+predictions <- predict(modFit, newdata=testPart1)
+
+# Confusion matrix
+> confusionMatrix(predictions, testPart1$classe)
+Confusion Matrix and Statistics
+
+          Reference
+Prediction   A   B   C   D   E
+         A 661  20   0   0   0
+         B   3 412  18   4   1
+         C   1  21 384   8   0
+         D   0   0   8 374   7
+         E   4   3   0   0 425
+
+Overall Statistics
+                                          
+               Accuracy : 0.9584          
+                 95% CI : (0.9495, 0.9661)
+    No Information Rate : 0.2842          
+    P-Value [Acc > NIR] : < 2.2e-16       
+                                          
+                  Kappa : 0.9473          
+ Mcnemar's Test P-Value : NA              
+
+Statistics by Class:
+
+                     Class: A Class: B Class: C Class: D Class: E
+Sensitivity            0.9880   0.9035   0.9366   0.9689   0.9815
+Specificity            0.9881   0.9863   0.9846   0.9924   0.9964
+Pos Pred Value         0.9706   0.9406   0.9275   0.9614   0.9838
+Neg Pred Value         0.9952   0.9770   0.9866   0.9939   0.9958
+Prevalence             0.2842   0.1937   0.1742   0.1640   0.1839
+Detection Rate         0.2808   0.1750   0.1631   0.1589   0.1805
+Detection Prevalence   0.2893   0.1861   0.1759   0.1653   0.1835
+Balanced Accuracy      0.9881   0.9449   0.9606   0.9806   0.9889
+```
+
+Out-of-sample error: 1 - 0.9584 = 0.0416
+
+b) bootstrapping used as resampling method
+
+Dividing the set into train and test:
+
+```{r eval=FALSE}
+set.seed(666)
+inPart22 <- createDataPartition(y=part2$classe, 0.6, list=FALSE)
+trainPart2 <- part2[inPart22, ]
+testPart2 <- part2[-inPart22, ]
+```
+
+Fitting the model:
+
+```{r eval=FALSE}
+set.seed(1235)
+modFit2 <- train(classe ~ ., data=trainPart2, method="rf", 
+                 trControl=trainControl(method = "boot", number = 4), prox=TRUE)
+
+```
+
+
+```{r eval=FALSE}
+> modFit2
+Random Forest 
+
+2722 samples
+  53 predictor
+   5 classes: 'A', 'B', 'C', 'D', 'E' 
+
+Pre-processing: centered, scaled 
+Resampling: Bootstrapped (4 reps) 
+
+Summary of sample sizes: 2722, 2722, 2722, 2722 
+
+Resampling results across tuning parameters:
+
+  mtry  Accuracy   Kappa      Accuracy SD  Kappa SD  
+   2    0.9416169  0.9257978  0.00969427   0.01236809
+  29    0.9434190  0.9281140  0.01235619   0.01571887
+  57    0.9321553  0.9138103  0.01651950   0.02103008
+
+Accuracy was used to select the optimal model using  the largest value.
+The final value used for the model was mtry = 29. 
+```
+
+Evaluation of the accuracy on the sampled test set:
+
+```{r eval=FALSE}
+> print(confusionMatrix(predictions2, testPart2$classe), digits=4)
+Confusion Matrix and Statistics
+
+          Reference
+Prediction   A   B   C   D   E
+         A 505  16   1   0   0
+         B   7 316  16   2   5
+         C   1  17 297  18   2
+         D   0   0   1 274   4
+         E   2   1   1   3 322
+
+Overall Statistics
+                                         
+               Accuracy : 0.9464         
+                 95% CI : (0.935, 0.9564)
+    No Information Rate : 0.2844         
+    P-Value [Acc > NIR] : < 2.2e-16      
+                                         
+                  Kappa : 0.9322         
+ Mcnemar's Test P-Value : NA             
+
+Statistics by Class:
+
+                     Class: A Class: B Class: C Class: D Class: E
+Sensitivity            0.9806   0.9029   0.9399   0.9226   0.9670
+Specificity            0.9869   0.9795   0.9746   0.9967   0.9953
+Pos Pred Value         0.9674   0.9133   0.8866   0.9821   0.9787
+Neg Pred Value         0.9922   0.9768   0.9871   0.9850   0.9926
+Prevalence             0.2844   0.1933   0.1745   0.1640   0.1839
+Detection Rate         0.2789   0.1745   0.1640   0.1513   0.1778
+Detection Prevalence   0.2882   0.1911   0.1850   0.1541   0.1817
+Balanced Accuracy      0.9837   0.9412   0.9572   0.9596   0.9811
+```
+
+Out-of-sample error: 1 - 0.9464 = 0.0536.
+
+**Boosting**
+
+Dividing the set in training and testing:
+
+```{r eval=FALSE}
+inPart33 <- createDataPartition(y=part3$classe, p=0.6, list=FALSE)
+trainPart3 <- part3[inPart33, ]
+testPart3 <- part3[-inPart33, ]
+```
+
+Fitting the model:
+
+```{r eval=FALSE}
+set.seed(1235)
+modFit3 <- train(classe ~ ., data=trainPart3, method="gbm", 
+                 trControl=trainControl(method = "boot", number = 4), verbose=FALSE)
+```
+
+
+```{r eval=FALSE}
+> modFit3
+Stochastic Gradient Boosting 
+
+2763 samples
+  53 predictor
+   5 classes: 'A', 'B', 'C', 'D', 'E' 
+
+No pre-processing
+Resampling: Bootstrapped (4 reps) 
+
+Summary of sample sizes: 2763, 2763, 2763, 2763 
+
+Resampling results across tuning parameters:
+
+  interaction.depth  n.trees  Accuracy   Kappa      Accuracy SD  Kappa SD   
+  1                   50      0.7474980  0.6791929  0.002609728  0.003626248
+  1                  100      0.8015570  0.7482958  0.007159736  0.009438660
+  1                  150      0.8344871  0.7900384  0.005425959  0.006906672
+  2                   50      0.8383377  0.7948604  0.009922948  0.012815273
+  2                  100      0.8848518  0.8539329  0.009422202  0.012228369
+  2                  150      0.9029252  0.8768140  0.014591346  0.018665314
+  3                   50      0.8818460  0.8500369  0.017484256  0.022509298
+  3                  100      0.9179775  0.8959638  0.011055597  0.014160019
+  3                  150      0.9284069  0.9091616  0.009651412  0.012242783
+
+Tuning parameter 'shrinkage' was held constant at a value of 0.1
+Tuning parameter 'n.minobsinnode' was
+ held constant at a value of 10
+Accuracy was used to select the optimal model using  the largest value.
+The final values used for the model were n.trees = 150, interaction.depth = 3, shrinkage = 0.1
+ and n.minobsinnode = 10. 
+```
+
+Evaluation of the accuracy on the sampled test set:
+
+```{r eval=FALSE}
+predictions3 <- predict(modFit3, newdata=testPart3)
+
+# Confusion matrix
+> confusionMatrix(predictions3, testPart3$classe)
+Confusion Matrix and Statistics
+
+          Reference
+Prediction   A   B   C   D   E
+         A 507  23   0   0   0
+         B   8 311  10   0   5
+         C   1  18 306  16  12
+         D   4   1   3 283  10
+         E   3   3   1   2 311
+
+Overall Statistics
+                                          
+               Accuracy : 0.9347          
+                 95% CI : (0.9224, 0.9456)
+    No Information Rate : 0.2845          
+    P-Value [Acc > NIR] : < 2.2e-16       
+                                          
+                  Kappa : 0.9174          
+ Mcnemar's Test P-Value : 5.912e-06       
+
+Statistics by Class:
+
+                     Class: A Class: B Class: C Class: D Class: E
+Sensitivity            0.9694   0.8736   0.9563   0.9402   0.9201
+Specificity            0.9825   0.9845   0.9690   0.9883   0.9940
+Pos Pred Value         0.9566   0.9311   0.8669   0.9402   0.9719
+Neg Pred Value         0.9878   0.9701   0.9906   0.9883   0.9822
+Prevalence             0.2845   0.1937   0.1741   0.1638   0.1839
+Detection Rate         0.2758   0.1692   0.1665   0.1540   0.1692
+Detection Prevalence   0.2884   0.1817   0.1921   0.1638   0.1741
+Balanced Accuracy      0.9760   0.9290   0.9626   0.9642   0.9571
+```
+
+
+Out-of-sample error: 1 - 0.9347 = 0.0653.
+
+The accuracy of the random forest and the boosting methods was similar and as expected very high. The random forests model showed higher accuracy and I run this model (with the cross-validation k-fold) on the 20 new tests. Anyways for the provided test set, all methods resulted in the same predictions. All values were correctly predicted.
+
+```{r eval=FALSE}
+# Test results
+answers = predict(modFit, newdata=reducedTests)
+#  B A B A A E D B A A B C B A E E A B B B
+```
